@@ -1,0 +1,1653 @@
+Kubernetes中文社区
+开发实践
+行业动态
+入门教程
+安装教程
+文档下载
+QQ/微信群
+视频
+活动
+中文文档
+K8S 1.16版本
+1.15
+1.14
+CI/CD
+网络
+存储
+安全
+监控
+kubectl命令表
+关注本站 
+登录 | 加入我们
+输入关键字
+
+
+您目前处于：社区首页>Kubernetes安装说明>kubernetes1.13.1+etcd3.3.10+flanneld0.10集群部署
+kubernetes1.13.1+etcd3.3.10+flanneld0.10集群部署
+2019-01-18 17:25 中文社区 分类：Kubernetes安装说明 阅读(62947) 作者：闵永涛 评论(157)
+Kubernetes1.13新特性
+使用kubeadm（GA）简化Kubernetes集群管理
+大多数与Kubernetes的工程师，都应该会使用kubeadm。它是管理集群生命周期的重要工具，从创建到配置再到升级; 现在kubeadm正式成为GA。kubeadm处理现有硬件上的生产集群的引导，并以最佳实践方式配置核心Kubernetes组件，以便为新节点提供安全而简单的连接流程并支持轻松升级。这个GA版本值得注意的是现在已经毕业的高级功能，特别是可插拔性和可配置性。kubeadm的范围是管理员和自动化，更高级别系统的工具箱，这个版本是朝这个方向迈出的重要一步。
+
+容器存储接口（CSI）进入GA
+容器存储接口（CSI）现在已经GA，在v1.9中作为alpha引入，在v1.10中作为beta引入。通过CSI，Kubernetes卷层变得真正可扩展。这为第三方存储提供商提供了编写与Kubernetes互操作而无需触及核心代码的插件的机会。该规范本身也达到了1.0状态。
+
+CoreDNS现在是Kubernetes的默认DNS服务器
+在1.11中，我们宣布CoreDNS已达到基于DNS的服务发现的一般可用性。在1.13中，CoreDNS现在将kube-dns替换为Kubernetes的默认DNS服务器。CoreDNS是一个通用的，权威的DNS服务器，提供与Kubernetes向后兼容但可扩展的集成。CoreDNS比以前的DNS服务器具有更少的移动部件，因为它是单个可执行文件和单个进程，并通过创建自定义DNS条目来支持灵活的用例。它也用Go编写，使其具有内存安全性。
+
+一、官方文档
+https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.13.md#downloads-for-v1131
+https://kubernetes.io/docs/home/?path=users&persona=app-developer&level=foundational
+https://github.com/etcd-io/etcd
+https://shengbao.org/348.html
+https://github.com/coreos/flannel
+http://www.cnblogs.com/blogscc/p/10105134.html
+https://blog.csdn.net/xiegh2014/article/details/84830880
+https://blog.csdn.net/tiger435/article/details/85002337
+https://www.cnblogs.com/wjoyxt/p/9968491.html
+https://blog.csdn.net/zhaihaifei/article/details/79098564
+http://blog.51cto.com/jerrymin/1898243
+http://www.cnblogs.com/xuxinkun/p/5696031.html
+二、下载链接
+Client Binaries
+https://dl.k8s.io/v1.13.1/kubernetes-client-linux-amd64.tar.gz
+Server Binaries
+https://dl.k8s.io/v1.13.1/kubernetes-server-linux-amd64.tar.gz
+Node Binaries
+https://dl.k8s.io/v1.13.1/kubernetes-node-linux-amd64.tar.gz
+etcd
+https://github.com/etcd-io/etcd/releases/download/v3.3.10/etcd-v3.3.10-linux-amd64.tar.gz
+flannel
+https://github.com/coreos/flannel/releases/download/v0.10.0/flannel-v0.10.0-linux-amd64.tar.gz
+三、角色划分
+k8s-master1	10.2.8.44	k8s-master	etcd、kube-apiserver、kube-controller-manager、kube-scheduler
+k8s-node1	10.2.8.65	k8s-node	etcd、kubelet、docker、kube_proxy
+k8s-node2	10.2.8.34	k8s-node	etcd、kubelet、docker、kube_proxy
+四、Master部署
+4.1 下载软件
+wget https://dl.k8s.io/v1.13.1/kubernetes-server-linux-amd64.tar.gz
+wget https://dl.k8s.io/v1.13.1/kubernetes-client-linux-amd64.tar.gz
+wget https://github.com/etcd-io/etcd/releases/download/v3.3.10/etcd-v3.3.10-linux-amd64.tar.gz
+wget https://github.com/coreos/flannel/releases/download/v0.10.0/flannel-v0.10.0-linux-amd64.tar.gz
+4.2 cfssl安装
+wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+wget https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+wget https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
+chmod +x cfssl_linux-amd64 cfssljson_linux-amd64 cfssl-certinfo_linux-amd64
+mv cfssl_linux-amd64 /usr/local/bin/cfssl
+mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
+mv cfssl-certinfo_linux-amd64 /usr/bin/cfssl-certinfo
+4.3 创建etcd证书
+mkdir /k8s/etcd/{bin,cfg,ssl} -p
+mkdir /k8s/kubernetes/{bin,cfg,ssl} -p
+cd /k8s/etcd/ssl/
+1）etcd ca配置
+
+cat << EOF | tee ca-config.json
+{
+  "signing": {
+    "default": {
+      "expiry": "87600h"
+    },
+    "profiles": {
+      "etcd": {
+         "expiry": "87600h",
+         "usages": [
+            "signing",
+            "key encipherment",
+            "server auth",
+            "client auth"
+        ]
+      }
+    }
+  }
+}
+EOF
+2）etcd ca证书
+
+cat << EOF | tee ca-csr.json
+{
+    "CN": "etcd CA",
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "CN",
+            "L": "Beijing",
+            "ST": "Beijing"
+        }
+    ]
+}
+EOF
+3）etcd server证书
+
+cat << EOF | tee server-csr.json
+{
+    "CN": "etcd",
+    "hosts": [
+    "10.2.8.44",
+    "10.2.8.65",
+    "10.2.8.34"
+    ],
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "CN",
+            "L": "Beijing",
+            "ST": "Beijing"
+        }
+    ]
+}
+EOF
+4）生成etcd ca证书和私钥 初始化ca
+
+cfssl gencert -initca ca-csr.json | cfssljson -bare ca 
+[root@elasticsearch01 ssl]# ls
+ca-config.json  ca-csr.json  server-csr.json
+[root@elasticsearch01 ssl]# cfssl gencert -initca ca-csr.json | cfssljson -bare ca 
+2018/12/26 16:13:54 [INFO] generating a new CA key and certificate from CSR
+2018/12/26 16:13:54 [INFO] generate received request
+2018/12/26 16:13:54 [INFO] received CSR
+2018/12/26 16:13:54 [INFO] generating key: rsa-2048
+2018/12/26 16:13:54 [INFO] encoded CSR
+2018/12/26 16:13:54 [INFO] signed certificate with serial number 144752911121073185391033754516204538929473929443
+[root@elasticsearch01 ssl]# ls
+ca-config.json  ca.csr  ca-csr.json  ca-key.pem  ca.pem  server-csr.json
+生成server证书
+
+cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=etcd server-csr.json | cfssljson -bare server
+[root@elasticsearch01 ssl]# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=etcd server-csr.json | cfssljson -bare server
+2018/12/26 16:18:53 [INFO] generate received request
+2018/12/26 16:18:53 [INFO] received CSR
+2018/12/26 16:18:53 [INFO] generating key: rsa-2048
+2018/12/26 16:18:54 [INFO] encoded CSR
+2018/12/26 16:18:54 [INFO] signed certificate with serial number 388122587040599986639159163167557684970159030057
+2018/12/26 16:18:54 [WARNING] This certificate lacks a "hosts" field. This makes it unsuitable for websites. 
+For more information see the Baseline Requirements for the Issuance and Management of Publicly-Trusted Certificates, v.1.1.6, from the CA/Browser Forum (https://cabforum.org);
+specifically, section 10.2.3 ("Information Requirements").
+[root@elasticsearch01 ssl]# ls
+ca-config.json  ca.csr  ca-csr.json  ca-key.pem  ca.pem  server.csr  server-csr.json  server-key.pem  server.pem
+4.4 etcd安装
+1）解压缩
+
+tar -xvf etcd-v3.3.10-linux-amd64.tar.gz
+cd etcd-v3.3.10-linux-amd64/
+cp etcd etcdctl /k8s/etcd/bin/
+2）配置etcd主文件
+
+vim /k8s/etcd/cfg/etcd.conf   
+#[Member]
+ETCD_NAME="etcd01"
+ETCD_DATA_DIR="/data1/etcd"
+ETCD_LISTEN_PEER_URLS="https://10.2.8.44:2380"
+ETCD_LISTEN_CLIENT_URLS="https://10.2.8.44:2379"
+ 
+#[Clustering]
+ETCD_INITIAL_ADVERTISE_PEER_URLS="https://10.2.8.44:2380"
+ETCD_ADVERTISE_CLIENT_URLS="https://10.2.8.44:2379"
+ETCD_INITIAL_CLUSTER="etcd01=https://10.2.8.44:2380,etcd02=https://10.2.8.65:2380,etcd03=https://10.2.8.34:2380"
+ETCD_INITIAL_CLUSTER_TOKEN="etcd-cluster"
+ETCD_INITIAL_CLUSTER_STATE="new"
+
+#[Security]
+ETCD_CERT_FILE="/k8s/etcd/ssl/server.pem"
+ETCD_KEY_FILE="/k8s/etcd/ssl/server-key.pem"
+ETCD_TRUSTED_CA_FILE="/k8s/etcd/ssl/ca.pem"
+ETCD_CLIENT_CERT_AUTH="true"
+ETCD_PEER_CERT_FILE="/k8s/etcd/ssl/server.pem"
+ETCD_PEER_KEY_FILE="/k8s/etcd/ssl/server-key.pem"
+ETCD_PEER_TRUSTED_CA_FILE="/k8s/etcd/ssl/ca.pem"
+ETCD_PEER_CLIENT_CERT_AUTH="true"
+3）配置etcd启动文件
+
+mkdir /data1/etcd
+vim /usr/lib/systemd/system/etcd.service
+[Unit]
+Description=Etcd Server
+After=network.target
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+WorkingDirectory=/data1/etcd/
+EnvironmentFile=-/k8s/etcd/cfg/etcd.conf
+# set GOMAXPROCS to number of processors
+ExecStart=/bin/bash -c "GOMAXPROCS=$(nproc) /k8s/etcd/bin/etcd --name=\"${ETCD_NAME}\" --data-dir=\"${ETCD_DATA_DIR}\" --listen-client-urls=\"${ETCD_LISTEN_CLIENT_URLS}\" --listen-peer-urls=\"${ETCD_LISTEN_PEER_URLS}\" --advertise-client-urls=\"${ETCD_ADVERTISE_CLIENT_URLS}\" --initial-cluster-token=\"${ETCD_INITIAL_CLUSTER_TOKEN}\" --initial-cluster=\"${ETCD_INITIAL_CLUSTER}\" --initial-cluster-state=\"${ETCD_INITIAL_CLUSTER_STATE}\" --cert-file=\"${ETCD_CERT_FILE}\" --key-file=\"${ETCD_KEY_FILE}\" --trusted-ca-file=\"${ETCD_TRUSTED_CA_FILE}\" --client-cert-auth=\"${ETCD_CLIENT_CERT_AUTH}\" --peer-cert-file=\"${ETCD_PEER_CERT_FILE}\" --peer-key-file=\"${ETCD_PEER_KEY_FILE}\" --peer-trusted-ca-file=\"${ETCD_PEER_TRUSTED_CA_FILE}\" --peer-client-cert-auth=\"${ETCD_PEER_CLIENT_CERT_AUTH}\""
+Restart=on-failure
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+4）启动 注意启动前etcd02、etcd03同样配置下
+
+systemctl daemon-reload
+systemctl enable etcd
+systemctl start etcd
+5）服务检查
+
+/k8s/etcd/bin/etcdctl --ca-file=/k8s/etcd/ssl/ca.pem --cert-file=/k8s/etcd/ssl/server.pem --key-file=/k8s/etcd/ssl/server-key.pem --endpoints="https://10.2.8.44:2379,https://10.2.8.65:2379,https://10.2.8.34:2379" cluster-health
+member c21df2258ce015e6 is healthy: got healthy result from https://10.2.8.34:2379
+member d427109ed3caf9c3 is healthy: got healthy result from https://10.2.8.44:2379
+member ec8c40660d3c1192 is healthy: got healthy result from https://10.2.8.65:2379
+cluster is healthy
+4.5 生成kubernets证书与私钥
+1）制作kubernetes ca证书
+
+cd /k8s/kubernetes/ssl
+cat << EOF | tee ca-config.json
+{
+  "signing": {
+    "default": {
+      "expiry": "87600h"
+    },
+    "profiles": {
+      "kubernetes": {
+         "expiry": "87600h",
+         "usages": [
+            "signing",
+            "key encipherment",
+            "server auth",
+            "client auth"
+        ]
+      }
+    }
+  }
+}
+EOF
+cat << EOF | tee ca-csr.json
+{
+    "CN": "kubernetes",
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "CN",
+            "L": "Beijing",
+            "ST": "Beijing",
+            "O": "k8s",
+            "OU": "System"
+        }
+    ]
+}
+EOF
+cfssl gencert -initca ca-csr.json | cfssljson -bare ca -
+[root@elasticsearch01 ssl]# cfssl gencert -initca ca-csr.json | cfssljson -bare ca -
+2018/12/27 09:47:08 [INFO] generating a new CA key and certificate from CSR
+2018/12/27 09:47:08 [INFO] generate received request
+2018/12/27 09:47:08 [INFO] received CSR
+2018/12/27 09:47:08 [INFO] generating key: rsa-2048
+2018/12/27 09:47:08 [INFO] encoded CSR
+2018/12/27 09:47:08 [INFO] signed certificate with serial number 156611735285008649323551446985295933852737436614
+[root@elasticsearch01 ssl]# ls
+ca-config.json  ca.csr  ca-csr.json  ca-key.pem  ca.pem
+2）制作apiserver证书
+
+cat << EOF | tee server-csr.json
+{
+    "CN": "kubernetes",
+    "hosts": [
+      "10.254.0.1",
+      "127.0.0.1",
+      "10.2.8.44",
+	  "10.2.8.65",
+	  "10.2.8.34",
+      "kubernetes",
+      "kubernetes.default",
+      "kubernetes.default.svc",
+      "kubernetes.default.svc.cluster",
+      "kubernetes.default.svc.cluster.local"
+    ],
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "CN",
+            "L": "Beijing",
+            "ST": "Beijing",
+            "O": "k8s",
+            "OU": "System"
+        }
+    ]
+}
+EOF
+cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes server-csr.json | cfssljson -bare server
+[root@elasticsearch01 ssl]# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes server-csr.json | cfssljson -bare server
+2018/12/27 09:51:56 [INFO] generate received request
+2018/12/27 09:51:56 [INFO] received CSR
+2018/12/27 09:51:56 [INFO] generating key: rsa-2048
+2018/12/27 09:51:56 [INFO] encoded CSR
+2018/12/27 09:51:56 [INFO] signed certificate with serial number 399376216731194654868387199081648887334508501005
+2018/12/27 09:51:56 [WARNING] This certificate lacks a "hosts" field. This makes it unsuitable for
+websites. For more information see the Baseline Requirements for the Issuance and Management
+of Publicly-Trusted Certificates, v.1.1.6, from the CA/Browser Forum (https://cabforum.org);
+specifically, section 10.2.3 ("Information Requirements").
+[root@elasticsearch01 ssl]# ls
+ca-config.json  ca.csr  ca-csr.json  ca-key.pem  ca.pem  server.csr  server-csr.json  server-key.pem  server.pem
+3）制作kube-proxy证书
+
+cat << EOF | tee kube-proxy-csr.json
+{
+  "CN": "system:kube-proxy",
+  "hosts": [],
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "CN",
+      "L": "Beijing",
+      "ST": "Beijing",
+      "O": "k8s",
+      "OU": "System"
+    }
+  ]
+}
+EOF
+cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes kube-proxy-csr.json | cfssljson -bare kube-proxy
+[root@elasticsearch01 ssl]# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes kube-proxy-csr.json | cfssljson -bare kube-proxy
+2018/12/27 09:52:40 [INFO] generate received request
+2018/12/27 09:52:40 [INFO] received CSR
+2018/12/27 09:52:40 [INFO] generating key: rsa-2048
+2018/12/27 09:52:40 [INFO] encoded CSR
+2018/12/27 09:52:40 [INFO] signed certificate with serial number 633932731787505365511506755558794469389165123417
+2018/12/27 09:52:40 [WARNING] This certificate lacks a "hosts" field. This makes it unsuitable for
+websites. For more information see the Baseline Requirements for the Issuance and Management
+of Publicly-Trusted Certificates, v.1.1.6, from the CA/Browser Forum (https://cabforum.org);
+specifically, section 10.2.3 ("Information Requirements").
+[root@elasticsearch01 ssl]# ls
+ca-config.json  ca-csr.json  ca.pem          kube-proxy-csr.json  kube-proxy.pem  server-csr.json  server.pem
+ca.csr          ca-key.pem   kube-proxy.csr  kube-proxy-key.pem   server.csr      server-key.pem
+4.6部署kubernetes server
+kubernetes master 节点运行如下组件： kube-apiserver kube-scheduler kube-controller-manager kube-scheduler 和 kube-controller-manager 可以以集群模式运行，通过 leader 选举产生一个工作进程，其它进程处于阻塞模式，master三节点高可用模式下可用
+
+1）解压缩文件
+
+tar -zxvf kubernetes-server-linux-amd64.tar.gz 
+cd kubernetes/server/bin/
+cp kube-scheduler kube-apiserver kube-controller-manager kubectl /k8s/kubernetes/bin/
+2）部署kube-apiserver组件 创建TLS Bootstrapping Token
+
+[root@elasticsearch01 bin]# head -c 16 /dev/urandom | od -An -t x | tr -d ' '
+f2c50331f07be89278acdaf341ff1ecc
+ 
+vim /k8s/kubernetes/cfg/token.csv
+f2c50331f07be89278acdaf341ff1ecc,kubelet-bootstrap,10001,"system:kubelet-bootstrap"
+创建Apiserver配置文件
+
+vim /k8s/kubernetes/cfg/kube-apiserver 
+KUBE_APISERVER_OPTS="--logtostderr=true \
+--v=4 \
+--etcd-servers=https://10.2.8.44:2379,https://10.2.8.65:2379,https://10.2.8.34:2379 \
+--bind-address=10.2.8.44 \
+--secure-port=6443 \
+--advertise-address=10.2.8.44 \
+--allow-privileged=true \
+--service-cluster-ip-range=10.254.0.0/16 \
+--enable-admission-plugins=NamespaceLifecycle,LimitRanger,ServiceAccount,ResourceQuota,NodeRestriction \
+--authorization-mode=RBAC,Node \
+--enable-bootstrap-token-auth \
+--token-auth-file=/k8s/kubernetes/cfg/token.csv \
+--service-node-port-range=30000-50000 \
+--tls-cert-file=/k8s/kubernetes/ssl/server.pem  \
+--tls-private-key-file=/k8s/kubernetes/ssl/server-key.pem \
+--client-ca-file=/k8s/kubernetes/ssl/ca.pem \
+--service-account-key-file=/k8s/kubernetes/ssl/ca-key.pem \
+--etcd-cafile=/k8s/etcd/ssl/ca.pem \
+--etcd-certfile=/k8s/etcd/ssl/server.pem \
+--etcd-keyfile=/k8s/etcd/ssl/server-key.pem"
+创建apiserver systemd文件
+
+vim /usr/lib/systemd/system/kube-apiserver.service 
+
+[Unit]
+Description=Kubernetes API Server
+Documentation=https://github.com/kubernetes/kubernetes
+ 
+[Service]
+EnvironmentFile=-/k8s/kubernetes/cfg/kube-apiserver
+ExecStart=/k8s/kubernetes/bin/kube-apiserver $KUBE_APISERVER_OPTS
+Restart=on-failure
+ 
+[Install]
+WantedBy=multi-user.target
+启动服务
+
+systemctl daemon-reload
+systemctl enable kube-apiserver
+systemctl start kube-apiserver
+[root@elasticsearch01 bin]# systemctl status kube-apiserver
+● kube-apiserver.service - Kubernetes API Server
+   Loaded: loaded (/usr/lib/systemd/system/kube-apiserver.service; enabled; vendor preset: disabled)
+   Active: active (running) since Thu 2018-12-27 14:41:22 CST; 20s ago
+     Docs: https://github.com/kubernetes/kubernetes
+ Main PID: 22060 (kube-apiserver)
+   CGroup: /system.slice/kube-apiserver.service
+           └─22060 /k8s/kubernetes/bin/kube-apiserver --logtostderr=true --v=4 --etcd-servers=https://10.2.8.44:2379,https://10.2....
+
+[root@elasticsearch01 bin]# ps -ef |grep kube-apiserver
+root     22060     1  5 14:41 ?        00:00:14 /k8s/kubernetes/bin/kube-apiserver --logtostderr=true --v=4 --etcd-servers=https://10.2.8.44:2379,https://10.2.8.65:2379,https://10.2.8.34:2379 --bind-address=10.2.8.44 --secure-port=6443 --advertise-address=10.2.8.44 --allow-privileged=true --service-cluster-ip-range=10.254.0.0/16 --enable-admission-plugins=NamespaceLifecycle,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota,NodeRestriction --authorization-mode=RBAC,Node --enable-bootstrap-token-auth --token-auth-file=/k8s/kubernetes/cfg/token.csv --service-node-port-range=30000-50000 --tls-cert-file=/k8s/kubernetes/ssl/server.pem --tls-private-key-file=/k8s/kubernetes/ssl/server-key.pem --client-ca-file=/k8s/kubernetes/ssl/ca.pem --service-account-key-file=/k8s/kubernetes/ssl/ca-key.pem --etcd-cafile=/k8s/etcd/ssl/ca.pem --etcd-certfile=/k8s/etcd/ssl/server.pem --etcd-keyfile=/k8s/etcd/ssl/server-key.pem
+[root@elasticsearch01 bin]# netstat -tulpn |grep kube-apiserve
+tcp        0      0 10.2.8.44:6443          0.0.0.0:*               LISTEN      22060/kube-apiserve 
+tcp        0      0 127.0.0.1:8080          0.0.0.0:*               LISTEN      22060/kube-apiserve 
+3）部署kube-scheduler组件 创建kube-scheduler配置文件
+
+vim  /k8s/kubernetes/cfg/kube-scheduler 
+KUBE_SCHEDULER_OPTS="--logtostderr=true --v=4 --master=127.0.0.1:8080 --leader-elect"
+参数备注： –address：在 127.0.0.1:10251 端口接收 http /metrics 请求；kube-scheduler 目前还不支持接收 https 请求； –kubeconfig：指定 kubeconfig 文件路径，kube-scheduler 使用它连接和验证 kube-apiserver； –leader-elect=true：集群运行模式，启用选举功能；被选为 leader 的节点负责处理工作，其它节点为阻塞状态；
+
+创建kube-scheduler systemd文件
+
+vim /usr/lib/systemd/system/kube-scheduler.service 
+ 
+[Unit]
+Description=Kubernetes Scheduler
+Documentation=https://github.com/kubernetes/kubernetes
+ 
+[Service]
+EnvironmentFile=-/k8s/kubernetes/cfg/kube-scheduler
+ExecStart=/k8s/kubernetes/bin/kube-scheduler $KUBE_SCHEDULER_OPTS
+Restart=on-failure
+ 
+[Install]
+WantedBy=multi-user.target
+启动服务
+
+systemctl daemon-reload
+systemctl enable kube-scheduler.service 
+systemctl start kube-scheduler.service
+[root@elasticsearch01 bin]# systemctl status kube-scheduler.service
+● kube-scheduler.service - Kubernetes Scheduler
+   Loaded: loaded (/usr/lib/systemd/system/kube-scheduler.service; enabled; vendor preset: disabled)
+   Active: active (running) since Thu 2018-12-27 15:16:51 CST; 17s ago
+     Docs: https://github.com/kubernetes/kubernetes
+ Main PID: 29026 (kube-scheduler)
+   CGroup: /system.slice/kube-scheduler.service
+           └─29026 /k8s/kubernetes/bin/kube-scheduler --logtostderr=true --v=4 --master=127.0.0.1:8080 --leader-elect
+4）部署kube-controller-manager组件 创建kube-controller-manager配置文件
+
+vim /k8s/kubernetes/cfg/kube-controller-manager
+KUBE_CONTROLLER_MANAGER_OPTS="--logtostderr=true \
+--v=4 \
+--master=127.0.0.1:8080 \
+--leader-elect=true \
+--address=127.0.0.1 \
+--service-cluster-ip-range=10.254.0.0/16 \
+--cluster-name=kubernetes \
+--cluster-signing-cert-file=/k8s/kubernetes/ssl/ca.pem \
+--cluster-signing-key-file=/k8s/kubernetes/ssl/ca-key.pem  \
+--root-ca-file=/k8s/kubernetes/ssl/ca.pem \
+--service-account-private-key-file=/k8s/kubernetes/ssl/ca-key.pem"
+创建kube-controller-manager systemd文件
+
+vim /usr/lib/systemd/system/kube-controller-manager.service 
+ 
+[Unit]
+Description=Kubernetes Controller Manager
+Documentation=https://github.com/kubernetes/kubernetes
+ 
+[Service]
+EnvironmentFile=-/k8s/kubernetes/cfg/kube-controller-manager
+ExecStart=/k8s/kubernetes/bin/kube-controller-manager $KUBE_CONTROLLER_MANAGER_OPTS
+Restart=on-failure
+ 
+[Install]
+WantedBy=multi-user.target
+启动服务
+
+systemctl daemon-reload
+systemctl enable kube-controller-manager
+systemctl start kube-controller-manager
+[root@elasticsearch01 bin]# systemctl status kube-controller-manager
+● kube-controller-manager.service - Kubernetes Controller Manager
+   Loaded: loaded (/usr/lib/systemd/system/kube-controller-manager.service; enabled; vendor preset: disabled)
+   Active: active (running) since Thu 2018-12-27 15:19:19 CST; 11s ago
+     Docs: https://github.com/kubernetes/kubernetes
+ Main PID: 29510 (kube-controller)
+   CGroup: /system.slice/kube-controller-manager.service
+           └─29510 /k8s/kubernetes/bin/kube-controller-manager --logtostderr=true --v=4 --master=127.0.0.1:8080 --leader-elect=tru..
+4.7 验证kubeserver服务
+设置环境变量
+
+vim /etc/profile
+PATH=/k8s/kubernetes/bin:$PATH
+source /etc/profile
+查看master服务状态
+
+kubectl get cs,nodes
+[root@elasticsearch01 bin]# kubectl get cs,nodes
+NAME                                 STATUS    MESSAGE             ERROR
+componentstatus/controller-manager   Healthy   ok                  
+componentstatus/scheduler            Healthy   ok                  
+componentstatus/etcd-0               Healthy   {"health":"true"}   
+componentstatus/etcd-1               Healthy   {"health":"true"}   
+componentstatus/etcd-2               Healthy   {"health":"true"}   
+五、Node部署
+kubernetes work 节点运行如下组件： docker kubelet kube-proxy flannel
+
+5.1 Docker环境安装
+yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+yum list docker-ce --showduplicates | sort -r
+yum install docker-ce -y
+systemctl start docker && systemctl enable docker
+5.2 部署kubelet组件
+kublet 运行在每个 worker 节点上，接收 kube-apiserver 发送的请求，管理 Pod 容器，执行交互式命令，如exec、run、logs 等; kublet 启动时自动向 kube-apiserver 注册节点信息，内置的 cadvisor 统计和监控节点的资源使用情况; 为确保安全，只开启接收 https 请求的安全端口，对请求进行认证和授权，拒绝未授权的访问(如apiserver、heapster)
+
+1）安装二进制文件
+
+wget https://dl.k8s.io/v1.13.1/kubernetes-node-linux-amd64.tar.gz
+tar zxvf kubernetes-node-linux-amd64.tar.gz
+cd kubernetes/node/bin/
+cp kube-proxy kubelet kubectl /k8s/kubernetes/bin/
+2）复制相关证书到node节点
+
+[root@elasticsearch01 ssl]# scp *.pem 10.2.8.65:$PWD
+root@10.2.8.65's password: 
+ca-key.pem                                                                                         100% 1679   914.6KB/s   00:00    
+ca.pem                                                                                             100% 1359     1.0MB/s   00:00    
+kube-proxy-key.pem                                                                                 100% 1675     1.2MB/s   00:00    
+kube-proxy.pem                                                                                     100% 1403     1.1MB/s   00:00    
+server-key.pem                                                                                     100% 1679   809.1KB/s   00:00    
+server.pem     
+3）创建kubelet bootstrap kubeconfig文件 通过脚本实现
+
+vim /k8s/kubernetes/cfg/environment.sh
+#!/bin/bash
+#创建kubelet bootstrapping kubeconfig 
+BOOTSTRAP_TOKEN=f2c50331f07be89278acdaf341ff1ecc
+KUBE_APISERVER="https://10.2.8.44:6443"
+#设置集群参数
+kubectl config set-cluster kubernetes \
+  --certificate-authority=/k8s/kubernetes/ssl/ca.pem \
+  --embed-certs=true \
+  --server=${KUBE_APISERVER} \
+  --kubeconfig=bootstrap.kubeconfig
+ 
+#设置客户端认证参数
+kubectl config set-credentials kubelet-bootstrap \
+  --token=${BOOTSTRAP_TOKEN} \
+  --kubeconfig=bootstrap.kubeconfig
+ 
+# 设置上下文参数
+kubectl config set-context default \
+  --cluster=kubernetes \
+  --user=kubelet-bootstrap \
+  --kubeconfig=bootstrap.kubeconfig
+ 
+# 设置默认上下文
+kubectl config use-context default --kubeconfig=bootstrap.kubeconfig
+ 
+#----------------------
+ 
+# 创建kube-proxy kubeconfig文件
+ 
+kubectl config set-cluster kubernetes \
+  --certificate-authority=/k8s/kubernetes/ssl/ca.pem \
+  --embed-certs=true \
+  --server=${KUBE_APISERVER} \
+  --kubeconfig=kube-proxy.kubeconfig
+ 
+kubectl config set-credentials kube-proxy \
+  --client-certificate=/k8s/kubernetes/ssl/kube-proxy.pem \
+  --client-key=/k8s/kubernetes/ssl/kube-proxy-key.pem \
+  --embed-certs=true \
+  --kubeconfig=kube-proxy.kubeconfig
+ 
+kubectl config set-context default \
+  --cluster=kubernetes \
+  --user=kube-proxy \
+  --kubeconfig=kube-proxy.kubeconfig
+ 
+kubectl config use-context default --kubeconfig=kube-proxy.kubeconfig
+执行脚本
+
+[root@elasticsearch02 cfg]# sh environment.sh 
+Cluster "kubernetes" set.
+User "kubelet-bootstrap" set.
+Context "default" created.
+Switched to context "default".
+Cluster "kubernetes" set.
+User "kube-proxy" set.
+Context "default" created.
+Switched to context "default".
+[root@elasticsearch02 cfg]# ls
+bootstrap.kubeconfig  environment.sh  kube-proxy.kubeconfig
+4）创建kubelet参数配置模板文件
+
+vim /k8s/kubernetes/cfg/kubelet.config
+kind: KubeletConfiguration
+apiVersion: kubelet.config.k8s.io/v1beta1
+address: 10.2.8.65
+port: 10250
+readOnlyPort: 10255
+cgroupDriver: cgroupfs
+clusterDNS: ["10.254.0.10"]
+clusterDomain: cluster.local.
+failSwapOn: false
+authentication:
+  anonymous:
+    enabled: true
+5）创建kubelet配置文件
+
+vim /k8s/kubernetes/cfg/kubelet
+ 
+KUBELET_OPTS="--logtostderr=true \
+--v=4 \
+--hostname-override=10.2.8.65 \
+--kubeconfig=/k8s/kubernetes/cfg/kubelet.kubeconfig \
+--bootstrap-kubeconfig=/k8s/kubernetes/cfg/bootstrap.kubeconfig \
+--config=/k8s/kubernetes/cfg/kubelet.config \
+--cert-dir=/k8s/kubernetes/ssl \
+--pod-infra-container-image=registry.cn-hangzhou.aliyuncs.com/google-containers/pause-amd64:3.0"
+6）创建kubelet systemd文件
+
+vim /usr/lib/systemd/system/kubelet.service 
+ 
+[Unit]
+Description=Kubernetes Kubelet
+After=docker.service
+Requires=docker.service
+ 
+[Service]
+EnvironmentFile=/k8s/kubernetes/cfg/kubelet
+ExecStart=/k8s/kubernetes/bin/kubelet $KUBELET_OPTS
+Restart=on-failure
+KillMode=process
+ 
+[Install]
+WantedBy=multi-user.target
+7）将kubelet-bootstrap用户绑定到系统集群角色
+
+kubectl create clusterrolebinding kubelet-bootstrap \
+  --clusterrole=system:node-bootstrapper \
+  --user=kubelet-bootstrap
+注意这个默认连接localhost:8080端口，可以在master上操作
+
+[root@elasticsearch01 ssl]# kubectl create clusterrolebinding kubelet-bootstrap \
+>   --clusterrole=system:node-bootstrapper \
+>   --user=kubelet-bootstrap
+clusterrolebinding.rbac.authorization.k8s.io/kubelet-bootstrap created
+8）启动服务 systemctl daemon-reload systemctl enable kubelet systemctl start kubelet
+
+[root@elasticsearch02 cfg]# systemctl status kubelet
+● kubelet.service - Kubernetes Kubelet
+   Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled; vendor preset: disabled)
+   Active: active (running) since Thu 2018-12-27 17:34:30 CST; 18s ago
+ Main PID: 24676 (kubelet)
+   Memory: 88.6M
+   CGroup: /system.slice/kubelet.service
+           └─24676 /k8s/kubernetes/bin/kubelet --logtostderr=true --v=4 --hostname-override=10.2.8.44 --kubeconfig=/k8s/kubernetes...
+9）Master接受kubelet CSR请求 可以手动或自动 approve CSR 请求。推荐使用自动的方式，因为从 v1.8 版本开始，可以自动轮转approve csr 后生成的证书，如下是手动 approve CSR请求操作方法 查看CSR列表
+
+[root@elasticsearch01 ssl]# kubectl get csr
+NAME                                                   AGE    REQUESTOR           CONDITION
+node-csr-ij3py9j-yi-eoa8sOHMDs7VeTQtMv0N3Efj3ByZLMdc   102s   kubelet-bootstrap   Pending
+接受node
+
+[root@elasticsearch01 ssl]# kubectl certificate approve node-csr-ij3py9j-yi-eoa8sOHMDs7VeTQtMv0N3Efj3ByZLMdc
+certificatesigningrequest.certificates.k8s.io/node-csr-ij3py9j-yi-eoa8sOHMDs7VeTQtMv0N3Efj3ByZLMdc approved
+再查看CSR
+
+[root@elasticsearch01 ssl]# kubectl get csr
+NAME                                                   AGE     REQUESTOR           CONDITION
+node-csr-ij3py9j-yi-eoa8sOHMDs7VeTQtMv0N3Efj3ByZLMdc   5m13s   kubelet-bootstrap   Approved,Issued
+5.3部署kube-proxy组件
+kube-proxy 运行在所有 node节点上，它监听 apiserver 中 service 和 Endpoint 的变化情况，创建路由规则来进行服务负载均衡 1）创建 kube-proxy 配置文件
+
+vim /k8s/kubernetes/cfg/kube-proxy
+KUBE_PROXY_OPTS="--logtostderr=true \
+--v=4 \
+--hostname-override=10.2.8.65 \
+--cluster-cidr=10.254.0.0/16 \
+--kubeconfig=/k8s/kubernetes/cfg/kube-proxy.kubeconfig"
+2）创建kube-proxy systemd文件
+
+vim /usr/lib/systemd/system/kube-proxy.service 
+ 
+[Unit]
+Description=Kubernetes Proxy
+After=network.target
+ 
+[Service]
+EnvironmentFile=-/k8s/kubernetes/cfg/kube-proxy
+ExecStart=/k8s/kubernetes/bin/kube-proxy $KUBE_PROXY_OPTS
+Restart=on-failure
+ 
+[Install]
+WantedBy=multi-user.target
+3）启动服务 systemctl daemon-reload systemctl enable kube-proxy systemctl start kube-proxy
+
+[root@elasticsearch02 cfg]# systemctl status  kube-proxy
+● kube-proxy.service - Kubernetes Proxy
+   Loaded: loaded (/usr/lib/systemd/system/kube-proxy.service; enabled; vendor preset: disabled)
+   Active: active (running) since Thu 2018-12-27 18:31:42 CST; 11s ago
+ Main PID: 5376 (kube-proxy)
+   Memory: 40.9M
+   CGroup: /system.slice/kube-proxy.service
+           ‣ 5376 /k8s/kubernetes/bin/kube-proxy --logtostderr=true --v=4 --hostname-override=10.2.8.44 --cluster-cidr=10.254.0.0/...
+4）查看集群状态
+
+[root@elasticsearch01 cfg]# kubectl get nodes
+NAME        STATUS   ROLES    AGE     VERSION
+10.2.8.65   Ready    <none>   9m15s   v1.13.1
+5）同样操作部署node 10.2.8.34并认证csr，认证后会生成kubelet-client证书
+
+注意期间要是kubelet，kube-proxy配置错误，比如监听IP或者hostname错误导致node not found，需要删除kubelet-client证书，重启kubelet服务，重启认证csr即可
+
+[root@elasticsearch03 kubernetes]# ls ssl
+ca-key.pem  kubelet-client-2018-12-27-20-13-52.pem  kubelet.crt  kube-proxy-key.pem  server-key.pem
+ca.pem      kubelet-client-current.pem              kubelet.key  kube-proxy.pem      server.pem
+
+[root@elasticsearch01 ~]# kubectl get nodes
+NAME        STATUS   ROLES    AGE   VERSION
+10.2.8.34   Ready    <none>   13h   v1.13.1
+10.2.8.65   Ready    <none>   14h   v1.13.1
+六 Flanneld网络部署
+默认没有flanneld网络，Node节点间的pod不能通信，只能Node内通信，为了部署步骤简洁明了，故flanneld放在后面安装 flannel服务需要先于docker启动。flannel服务启动时主要做了以下几步的工作： 从etcd中获取network的配置信息 划分subnet，并在etcd中进行注册 将子网信息记录到/run/flannel/subnet.env中
+
+6.1 etcd注册网段
+[root@elasticsearch02 cfg]# /k8s/etcd/bin/etcdctl --ca-file=/k8s/etcd/ssl/ca.pem --cert-file=/k8s/etcd/ssl/server.pem --key-file=/k8s/etcd/ssl/server-key.pem --endpoints="https://10.2.8.44:2379,https://10.2.8.65:2379,https://10.2.8.34:2379"  set /k8s/network/config  '{ "Network": "10.254.0.0/16", "Backend": {"Type": "vxlan"}}'
+{ "Network": "10.254.0.0/16", "Backend": {"Type": "vxlan"}}
+flanneld 当前版本 (v0.10.0) 不支持 etcd v3，故使用 etcd v2 API 写入配置 key 和网段数据； 写入的 Pod 网段 ${CLUSTER_CIDR} 必须是 /16 段地址，必须与 kube-controller-manager 的 –cluster-cidr 参数值一致；
+
+6.2 flannel安装
+1）解压安装
+
+tar -xvf flannel-v0.10.0-linux-amd64.tar.gz
+mv flanneld mk-docker-opts.sh /k8s/kubernetes/bin/
+2）配置flanneld
+
+vim /k8s/kubernetes/cfg/flanneld
+FLANNEL_OPTIONS="--etcd-endpoints=https://10.2.8.44:2379,https://10.2.8.65:2379,https://10.2.8.34:2379 -etcd-cafile=/k8s/etcd/ssl/ca.pem -etcd-certfile=/k8s/etcd/ssl/server.pem -etcd-keyfile=/k8s/etcd/ssl/server-key.pem -etcd-prefix=/k8s/network"
+创建flanneld systemd文件
+
+vim /usr/lib/systemd/system/flanneld.service
+[Unit]
+Description=Flanneld overlay address etcd agent
+After=network-online.target network.target
+Before=docker.service
+ 
+[Service]
+Type=notify
+EnvironmentFile=/k8s/kubernetes/cfg/flanneld
+ExecStart=/k8s/kubernetes/bin/flanneld --ip-masq $FLANNEL_OPTIONS
+ExecStartPost=/k8s/kubernetes/bin/mk-docker-opts.sh -k DOCKER_NETWORK_OPTIONS -d /run/flannel/subnet.env
+Restart=on-failure
+ 
+[Install]
+WantedBy=multi-user.target
+注意
+
+mk-docker-opts.sh 脚本将分配给 flanneld 的 Pod 子网网段信息写入 /run/flannel/docker 文件，后续 docker 启动时 使用这个文件中的环境变量配置 docker0 网桥； flanneld 使用系统缺省路由所在的接口与其它节点通信，对于有多个网络接口（如内网和公网）的节点，可以用 -iface 参数指定通信接口; flanneld 运行时需要 root 权限；
+
+3）配置Docker启动指定子网 修改EnvironmentFile=/run/flannel/subnet.env，ExecStart=/usr/bin/dockerd $DOCKER_NETWORK_OPTIONS即可
+
+vim /usr/lib/systemd/system/docker.service 
+[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target firewalld.service
+Wants=network-online.target
+ 
+[Service]
+Type=notify
+EnvironmentFile=/run/flannel/subnet.env
+ExecStart=/usr/bin/dockerd $DOCKER_NETWORK_OPTIONS
+ExecReload=/bin/kill -s HUP $MAINPID
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+TimeoutStartSec=0
+Delegate=yes
+KillMode=process
+Restart=on-failure
+StartLimitBurst=3
+StartLimitInterval=60s
+ 
+[Install]
+WantedBy=multi-user.target
+4）启动服务 注意启动flannel前要关闭docker及相关的kubelet这样flannel才会覆盖docker0网桥
+
+systemctl daemon-reload
+systemctl stop docker
+systemctl start flanneld
+systemctl enable flanneld
+systemctl start docker
+systemctl restart kubelet
+systemctl restart kube-proxy
+5）验证服务
+
+[root@elasticsearch02 bin]# cat /run/flannel/subnet.env 
+DOCKER_OPT_BIP="--bip=10.254.35.1/24"
+DOCKER_OPT_IPMASQ="--ip-masq=false"
+DOCKER_OPT_MTU="--mtu=1450"
+DOCKER_NETWORK_OPTIONS=" --bip=10.254.35.1/24 --ip-masq=false --mtu=1450"
+[root@elasticsearch02 bin]# ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP qlen 1000
+    link/ether 52:54:00:a4:ca:ff brd ff:ff:ff:ff:ff:ff
+    inet 10.2.8.65/24 brd 10.2.8.255 scope global eth0
+       valid_lft forever preferred_lft forever
+3: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN 
+    link/ether 02:42:06:0a:ab:32 brd ff:ff:ff:ff:ff:ff
+    inet 10.254.35.1/24 brd 10.254.35.255 scope global docker0
+       valid_lft forever preferred_lft forever
+4: flannel.1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UNKNOWN 
+    link/ether 72:59:dc:2b:0a:21 brd ff:ff:ff:ff:ff:ff
+    inet 10.254.35.0/32 scope global flannel.1
+       valid_lft forever preferred_lft forever
+[root@elasticsearch01 k8s]# kubectl get nodes
+NAME        STATUS   ROLES    AGE    VERSION
+10.2.8.34   Ready    <none>   16h    v1.13.1
+10.2.8.65   Ready    <none>   18h    v1.13.1
+K8S中文社区微信公众号
+上一篇: CentOS 使用二进制部署 Kubernetes 1.13集群下一篇: 二进制部署Kubernetes v1.13.4 HA可选
+
+标签：Kubernetes1.13
+相关推荐
+使用Kubespray自动化部署Kubernetes 1.13.1
+CentOS 使用二进制部署 Kubernetes 1.13集群
+使用kubeadm安装Kubernetes 1.13
+kubeadm HA master(v1.13.0)离线包 + 自动化脚本 + 常用插件 For Centos/Fedora
+Kubernetes 1.13 正式发布，功能亮点一览！
+Kubernetes 1.13 版本发布：Kubeadm简化群集管理、容器存储接口（CSI）和CoreDNS作为默认DNS现已普遍可用
+kubernetes-部署RabbitMQ
+kubernetes-部署Oracle数据库
+评论 157
+
+社区交流
+imageimageimageimageimage
+
+提交评论
+昵称
+昵称 (必填)
+邮箱
+邮箱 (必填)
+网址
+网址
+#0
+您好 我按照操作node节点布置完后执行kubectl get nodes 不能正确显示弄得节点 回显的是No resources found.
+
+天上白玉京1年前 (2019-01-21)
+
+首先查看各个节点服务是否正常，每部署一个阶段核查一次，最后看 kubectl get csr ，是不是注册上了，在master注册上才会有资源，具体参考https://github.com/minminmsn/k8s1.13。
+
+三杯水1年前 (2019-01-23)
+
+node节点相关服务都正常启动 没有报错 csr也注册上了，但是kubctl get nodes就是没有何人返回结果 这咋回事啊
+
+nesta7个月前 (06-24)
+
+我也是这样的问题啊
+
+lycoris6个月前 (07-10)
+
+我的node也是起不来，master通过csr后，node就自动关了，在起就起不来了
+
+小凯1年前 (2019-01-23)
+
+你把csr清空，然后重启Node服务再重新添加，首先把node的客户端key删掉，key默认路径/k8s/kubernetes/ssl/kubelet-client-current.pem ，这样再次认证加入node。
+
+三杯水1年前 (2019-01-23)
+
+node启动后自动关了，一般就是证书的问题了，确保你证书没问题，要是修改了证书，客户端key删掉重新添加就是了，集群本身很健壮的，可以随便调整， 多折腾就通了。
+
+三杯水1年前 (2019-01-23)
+
+另外你再看看apiserver的日志，会告诉你证书认证失败等，再排查下吧。
+
+三杯水1年前 (2019-01-23)
+
+其中kubelet启动后又停止可能与cgroupfs driver有关，kubelet与docker要保持一致，centos默认是cgroupfs，ubuntu默认是systemd，需要根据自己情况调整。
+
+三杯水12个月前 (01-24)
+#0
+楼主部署完后验证没有啊？感觉是抄袭 https://www.kubernetes.org.cn/4963.html这里的，最后跑不起来的
+
+chichushanren1年前 (2019-01-21)
+
+您好，我在哪个基础上改了下有的不适合自己，具体参考我的github，跑的很好，其中证书，网络都得按照自己实际情况来，否则不行，https://github.com/minminmsn/k8s1.13。
+
+三杯水1年前 (2019-01-23)
+
+一定要细心，否则哪怕你输入一个字母错了，就会出问题，别人的文章只是个参考，关键还是得看自己，多折腾折腾就会了。
+
+三杯水1年前 (2019-01-23)
+
+我一般一边过，也出了不少问题但是没那么多，你们要是出了问题，可以把问题贴出来，细节也描述下，我可以帮看看。
+
+三杯水1年前 (2019-01-23)
+#0
+大家注意，本文的环境，其中kubelet启动后又停止可能与cgroupfs driver有关，kubelet与docker要保持一致，centos默认是cgroupfs，ubuntu默认是systemd，需要根据自己情况调整。
+系统环境 CentOS Linux release 7.4.1708 (Core) Docker版本 Server Version: 18.09.0 Cgroup Driver: cgroupfs
+4）创建kubelet参数配置模板文件
+vim /k8s/kubernetes/cfg/kubelet.config
+cgroupDriver: cgroupfs
+具体请查看：https://github.com/minminmsn/k8s1.13
+
+三杯水12个月前 (01-24)
+#0
+kube-apiserver, kube-controller-manager kube-scheduler配置完后执行 kubectl get cs,nodes Unable to connect to the server: x509: certificate signed by unknown authority
+
+栗山未来12个月前 (01-24)
+
+证书问题，apiserver这块，其中hosts这三个地方一定要写对，127、网段、节点
+
+cat << EOF | tee server-csr.json
+{
+"CN": "kubernetes",
+"hosts": [
+"10.254.0.1",
+"127.0.0.1",
+"10.2.8.44",
+
+三杯水12个月前 (01-24)
+
+会不会是kubectl 出了问题，因为kube-apiserver kube-controller-manager kube-scheduler这几个服务都running了啊，server-csr.json我也定义了集群IP、127还有master和nodeIP 在/etc/profile最底部也添加了path不明白哪里出了问题
+
+栗山未来12个月前 (01-24)
+
+不会，这个只是个客户端工具，在master上执行会直接连接127.0.0.1的8080端口。也不需要走证书。
+
+三杯水12个月前 (01-24)
+
+我想请教下master设置环境变量这个地方PATH=/k8s/kubernetes/bin:$PATH这个是什么意思。配置的是什么路径。感谢！
+
+栗山未来12个月前 (01-24)
+
+$PATH是本来的命令路径，你echo $PATH就知道了，这里只是把kubernetes/bin路径加上去，不加的话执行命令时就得全称了，例如/k8s/kubernetes/bin/kubectl。
+
+三杯水12个月前 (01-25)
+
+明白了，感谢版主！然后今天在配置node节点的时候，将kubelet-bootstrap用户绑定到系统集群角色时The connection to the server localhost:8080 was refused – did you specify the right host or port?是 /k8s/kubernetes/ssl/ca.pem这个证书的问题么
+
+栗山未来12个月前 (01-25)
+
+只有master节点localhost:8080端口可以连接，在Node节点就不行了，说的是这个意思。
+
+三杯水12个月前 (01-31)
+
+这个问题是怎么解决的？
+
+newgoo11个月前 (02-21)
+
+什么问题，证书吗？证书问题得自己排查。
+
+三杯水11个月前 (02-21)
+
+问题已经解决了
+
+newgoo11个月前 (02-22)
+
+你好，请问下怎么解决的呢？我也一样的问题，
+
+dfx11个月前 (02-27)
+
+“10.254.0.1”, 这个是指什么，网段？ 跟kubelet.config10.254.0.10的关系是什么？
+
+rudy11个月前 (02-13)
+
+这个是pod设置的网段10.0.0.0/16网段，其中kubernets的clusterip是10.254.0.1这个IP，10.254.0.10这个是手动设置coredns的IP。
+
+三杯水11个月前 (02-13)
+
+这里的这个网段需要特殊设置吗？
+10.254.0.1 10.254.0.10 这两个ip是可以任意设置的对吗？
+
+newgoo11个月前 (02-22)
+
+网段可以随便配置，默认10.254.0.1这个是默认0.1为Kubernetes的最好别动，后面哪个0.10是dns可以任意指定。
+
+三杯水11个月前 (02-28)
+
+研究了一下午，看了各种教程，最好终于解决了，因为之前安装过k8s，导致有/root/.kube，这个文件夹下面存着之前的k8s集群，删了就好了，妈的。
+
+dfx11个月前 (02-27)
+#0
+请问下 在集群启动成功后，在访问pod时有没有碰到Forbidden (user=system:anonymous, verb=get, resource=nodes, subresource=proxy) 这种权限问题
+
+zjq12个月前 (01-25)
+
+这个可能与准入控制器有关，需要对准入控制器进行修改，然后重启apiserver
+参考https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/文档。
+
+三杯水12个月前 (01-25)
+#0
+请问node节点配置时The connection to the server localhost:8080 was refused – did you specify the right host or port? 是什么原因
+
+潇潇雨12个月前 (01-25)
+
+问题已不复。原因是在node节点上执行的绑定kubelet-bootstrap，在master上面直接执行成功
+
+潇潇雨12个月前 (01-25)
+#0
+遇到一新的问题 在master上面没有看到csr请求是什么原因？ kubectl get csr : No resources found
+
+潇潇雨12个月前 (01-25)
+
+这个没事，默认csr是24小时还是多少，添加成功后就没用了，kubelet get nodes能有资源就行，如果没有nodes资源需要删除客户端kubelet-client-current.pem，然后重启kubelet重新添加.
+
+三杯水12个月前 (01-25)
+
+kubelet-client-current.pem这个文件怎么没有看到过
+
+潇潇雨12个月前 (01-27)
+
+node节点加入后就有啊，在Node节点的/k8s/kubernetes/ssl目录
+
+三杯水12个月前 (01-28)
+
+我也遇到master上面kubectl get csr : No resources found ，node节点上kuelete跑不起来，报 No cloud provider specified. 博主能给点意见吗
+
+平8个月前 (05-12)
+#0
+作者为什么要把这里 vim /k8s/kubernetes/cfg/kubelet.config改成cgroupDriver: systemd呢，人家docker默认就是cgroups啊
+
+我改回cgroupDriver: cgroupfs就可以，kubelet正常启动，节点正常发现
+
+[root@k8s-master ~]# kubectl get node
+NAME STATUS ROLES AGE VERSION
+192.168.92.57 Ready 2m17s v1.13.2
+192.168.92.58 Ready 11s v1.13.2
+[root@k8s-master ~]#
+
+will12个月前 (01-27)
+
+centos的默认是cgroupfs，有的系统默认的是systemd，根据自己的环境修改。
+
+三杯水12个月前 (01-28)
+#0
+请问kubelet启动失败怎么解决 E0127 14:56:04.556824 24808 kubelet.go:1308] Image garbage collection failed once. Stats initialization may not have completed yet: failed to get imageFs info: unable to find data in memory cache
+
+难为客12个月前 (01-27)
+
+没遇到过，可能与操作系统有关，另外看看内存分配。
+
+三杯水12个月前 (01-28)
+
+我也遇到这个问题 怎么解决的
+
+leafmei8个月前 (05-13)
+
+我也遇到这个问题 怎么解决的
+
+今夜打老虎6个月前 (07-24)
+#0
+向您请教一个问题，就是我使用VM 三台虚拟机搭建的k8s 三台网络模式是桥接模式可以直接上网，然后当更换地点后，虚拟机跟随外部ip变更。我只能把虚拟机的Ip设置成静态的保持原来的Ip，之后nodeport方式打不开dashbord网页。而且scheduler和manager-controller都不健康了Message: Get http://127.0.0.1:10251/healthz: dial tcp 127.0.0.1:10251: connect: connection refused
+
+风筝雨12个月前 (01-29)
+
+节点IP恢复成原来的之后，分别重启各个服务。
+
+三杯水12个月前 (01-29)
+#0
+我已经搭建出来了，有个地方大家需要注意一下，bootstrap.kubeconfig配置文件中的token需要和master节点上的token.csv的值保持一致。
+
+calentang12个月前 (01-30)
+
+对的，是要一样，#创建kubelet bootstrapping kubeconfig
+BOOTSTRAP_TOKEN=f2c50331f07be89278acdaf341ff1ecc 这个是bootstrap.kubeconfig时指定的，后续token.csv要保持一致。
+
+三杯水12个月前 (01-30)
+#0
+楼主有没有这个问题的解决方案 E0130 09:34:06.899767 1 reflector.go:205] github.com/coredns/coredns/plugin/kubernetes/controller.go:318: Failed to list *v1.Namespace: Get https://10.96.0.1:443/api/v1/namespaces?limit=500&resourceVersion=0: dial tcp 10.96.0.1:443: i/o timeout
+
+亦步亦趋12个月前 (01-30)
+
+没有，我coredns部署文档在这儿https://github.com/minminmsn/k8s1.13/tree/master/coredns。
+
+三杯水12个月前 (01-30)
+#0
+您好，我是在Mac上通过vagrant安装的两台虚拟机来部署K8s，按照您部署etcd的步骤操作完后，启动etcd后报错信息如下：health check for peer cabd42de124078a5 could not connect: x509: certificate signed by unknown authority (possibly because of “crypto/rsa: verification error” while trying to verify candidate authority certificate；应该是和证书有关，请问您有遇到过这个问题么
+
+肖飞12个月前 (01-31)
+
+是证书问题，x509，这里你手动创建证书，这里面etcd集群及后面k8s集群都是证书认证的，都需要自己创建证书。
+
+三杯水12个月前 (01-31)
+#0
+kubectl get nodes 返回 not found resources ，另外csr approve后的状态是approved，但教程里面是 approved,issued
+kube-apiserver 里面有错误：http: TLS handshake error from …..: remote error: tls: bad certificate
+
+rudy12个月前 (01-31)
+
+这个是证书的问题，加入集群失败，再证书环节再核对下，如果证书里面内容由错误需要修改，特别是api-server里面Host内容要根据实际情况填写，重新生成后下发，kubelet客户端证书清除后，重启node节点服务再重新添加即可。
+
+三杯水12个月前 (01-31)
+
+我也遇到这个问题，，完全按照版主的文档操作的，，删除证书–重新生成还是同样的错误：csr approve后的状态是approved，但教程里面是 approved,issued
+
+泥鳅3个月前 (10-28)
+#0
+你好，我在两个节点安上部署了etcd集群，且master节点也部署完成了。在master节点上输入 etcdctl cluster-health和kubectl get cs 都能看到etcd是healthy的状态，但我在node节点上部署flanneld时，虽然flanneld启动成功了，但后台日志一直提示 etcd cluster is unavailable or misconfigured，且kubelet服务成功启动后master节点也收不到csr请求，后台报错也是类似的请求master上的etcd节点失败。
+
+往事随风12个月前 (02-02)
+
+etcd集群是奇数个，你部署3个节点上试试，你可以etcd get 数据看看能不能获取到，集群配置信息都放在etcd集群上，如果etcd集群有问题，其他的都会有问题。
+
+三杯水12个月前 (02-02)
+#0
+出现error “remote error: tls: bad certificate”, ServerName “”错误，不知道大家是怎么解决的
+
+hani11个月前 (02-18)
+
+证书错误，需要生成正确的证书，重新建证书后，相关服务重启。
+
+三杯水11个月前 (02-18)
+
+复制粘贴改ip都是这个错误，证书还能有什么问题？还有其他方向吗？
+
+axin11个月前 (02-18)
+
+ETCD_CLUSTER_NODE_LIST中的ip必须在生成etcd TLS证书时在server-csr.json中的hosts字段中指定（Subject Alternative Name（SAN）），否则可能会得到(error “remote error: tls: bad certificate”, ServerName “”)这样的错误。其他就是网络端口防火墙，每个结点证书不一致，etcd版本，集群启动时间等，清空集群重启etcd。
+
+三杯水11个月前 (02-18)
+
+这个问题解决了吗
+
+wrangler9个月前 (04-27)
+
+rejected connection from “10.101.93.46:39350” (error “remote error: tls: bad certificate”, ServerName “”)
+
+wrangler9个月前 (04-27)
+#0
+wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+wget https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+wget https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
+chmod +x cfssl_linux-amd64 cfssljson_linux-amd64 cfssl-certinfo_linux-amd64
+mv cfssl_linux-amd64 /usr/local/bin/cfssl
+mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
+mv cfssl-certinfo_linux-amd64 /usr/bin/cfssl-certinfo
+
+这边只是把cfssl下载下来，没有进行安装呀，后续用cfssl报错，如下代码：
+/k8s/etcd/ssl# cfssl gencert -initca ca-csr.json | cfssljson -bare ca
+cfssl: command not found
+
+take11个月前 (02-19)
+
+这个是二进制解压缩就能用，其中放在/usr/local/bin是这个默认在centos系统PATH路径里面，所以可以直接用，如果是其他系统放在默认PATH里面，或者设置路径，或者写绝对路径。
+
+三杯水11个月前 (02-20)
+#0
+老哥，三节点 部署好后，测试创建 deployment nginx 实例2 .并开启了 NodePort 80:35798/TCP。 curl时候发现只有pods所在的两节点的IP。 curl IP:35798 是正常的，没有nginx pods那个节点 curl IP:35798 就是异常的。老哥有没有啥思路
+
+卖瓜老农11个月前 (02-19)
+
+kubecte get pod -o wide pod运行在哪些节点上，那些结点的nodeport端口就能访问，你可以去节点netstat -tulpn|grep 35798看看端口是否存活。
+
+三杯水11个月前 (02-20)
+#0
+配置etcd启动文件
+vim /usr/lib/systemd/system/etcd.service
+里面填写完后，保存退出报如下错误：
+“/usr/lib/systemd/system/etcd.service” E212: Can’t open file for writing
+
+take11个月前 (02-20)
+
+网上搜下
+
+三杯水11个月前 (02-20)
+#0
+独立的服务器，能按照这个文档安装集群吗
+
+take11个月前 (02-20)
+
+可以
+
+三杯水11个月前 (02-20)
+#0
+你好，请教你一下。新增加第三个node需要添加apiserver的server-csr.json文件（这个文件里有的IP才能添加node成功吗？）中的host IP，然后重新生成证书在下发到全部node节点吗？还是说直接按照搭建node部分的文档进行操作添加就可以呢？
+
+fy_starstar11个月前 (02-20)
+
+是的，需要重新生成证书，然后重启服务，其中hosts支持*.domain通配，线上的node节点可以使用域名形式，这样新增节点时就不需要变更证书了，具体的可以查查cfssl的语法。
+
+三杯水11个月前 (02-20)
+
+你好，有相关的文件推荐吗？需要搭建Coredns才能支持吗？
+
+fy_starstar11个月前 (02-21)
+
+这里面有大部分相关测试文档：https://github.com/minminmsn/k8s1.13
+
+三杯水11个月前 (02-21)
+
+好的，谢谢。
+
+fy_starstar11个月前 (02-21)
+#0
+注意启动前etcd02、etcd03同样配置下 etcd主文件也需要将master的证书copy到node节点吗？？？？ 还有你etcd的主配置 上面能否提示按实际情况修改，直接贴配置，也不提示
+
+archer11个月前 (02-21)
+
+需要，每个节点的对应位置都需要证书。centos7系统的话etcd配置只需要修改IP就行，其他不变。
+
+三杯水11个月前 (02-21)
+#0
+你好，我搭建好后为什么执行查看pod的日志命令会提供没有权限呢？
+报错如下：
+[root@test06 ~]# kubectl get pods –namespace=kube-system
+NAME READY STATUS RESTARTS AGE
+coredns-d8b5497cd-kslnd 1/1 Running 0 84m
+coredns-d8b5497cd-tf6gv 1/1 Running 0 49m
+[root@test06 ~]# kubectl logs -f coredns-d8b5497cd-kslnd –namespace=kube-system
+Error from server (Forbidden): Forbidden (user=system:anonymous, verb=get, resource=nodes, subresource=proxy) ( pods/log coredns-d8b5497cd-kslnd)
+
+fy_starstar11个月前 (02-21)
+
+需要对准入控制器进行修改，然后重启apiserver –enable-admission-plugins=NamespaceLifecycle,LimitRanger,ServiceAccount,ResourceQuota,NodeRestriction
+SecurityContextDeny 不enable，也可能是其他参数，查到修改。
+
+三杯水11个月前 (02-21)
+
+你好，我也出现了这个问题，此外通过kubectl exec -it -n /bin/bash 进入某个pod时也被拒绝了：
+error: unable to upgrade connection: Forbidden (user=system:anonymous, verb=create, resource=nodes, subresource=proxy)
+也是通过以上操作修改么？
+
+synapse11个月前 (02-22)
+
+是的，就是看授权及RABC配置。
+
+三杯水11个月前 (02-23)
+
+好像是kubelet需要对请求进行身份验证/授权，同时apiserver需要提供kubelet的身份认证信息，但我不太清楚该如何解决，而且修改apiserver后会报如下错误：
+The connection to the server localhost:8080 was refused – did you specify the right host or port?
+请问该如何配置呢？
+
+synapse11个月前 (02-23)
+
+这个需要在master上执行。
+
+三杯水11个月前 (02-23)
+#0
+请教一下，我在node启动kubelet的时候出现了错误，
+I0222 11:37:35.398386 15162 kubelet_node_status.go:72] Attempting to register node 10.211.55.21
+I0222 11:37:35.399054 15162 server.go:459] Event(v1.ObjectReference{Kind:”Node”, Namespace:””, Name:”10.211.55.21″, UID:”10.211.55.21″, APIVersion:””, ResourceVersion:””, FieldPath:””}): type: ‘Normal’ reason: ‘NodeHasSufficientMemory’ Node 10.211.55.21 status is now: NodeHasSufficientMemory
+I0222 11:37:35.399083 15162 server.go:459] Event(v1.ObjectReference{Kind:”Node”, Namespace:””, Name:”10.211.55.21″, UID:”10.211.55.21″, APIVersion:””, ResourceVersion:””, FieldPath:””}): type: ‘Normal’ reason: ‘NodeHasNoDiskPressure’ Node 10.211.55.21 status is now: NodeHasNoDiskPressure
+I0222 11:37:35.399092 15162 server.go:459] Event(v1.ObjectReference{Kind:”Node”, Namespace:””, Name:”10.211.55.21″, UID:”10.211.55.21″, APIVersion:””, ResourceVersion:””, FieldPath:””}): type: ‘Normal’ reason: ‘NodeHasSufficientPID’ Node 10.211.55.21 status is now: NodeHasSufficientPID
+E0222 11:37:35.400348 15162 kubelet_node_status.go:94] Unable to register node “10.211.55.21” with API server: nodes “10.211.55.21” is forbidden: node “10.211.55.14” cannot modify node “10.211.55.21”
+E0222 11:37:35.489685 15162 kubelet.go:2266] node “10.211.55.21” not found
+
+这样的错误是什么到这的呀？怎么解决呢？
+10.211.55.21 这是我的node
+10.211.55.14 这是我的master
+还有一个错误是：
+I0222 11:37:34.593585 15162 kubelet_node_status.go:72] Attempting to register node 10.211.55.21
+I0222 11:37:34.594190 15162 server.go:459] Event(v1.ObjectReference{Kind:”Node”, Namespace:””, Name:”10.211.55.21″, UID:”10.211.55.21″, APIVersion:””, ResourceVersion:””, FieldPath:””}): type: ‘Normal’ reason: ‘NodeHasSufficientMemory’ Node 10.211.55.21 status is now: NodeHasSufficientMemory
+I0222 11:37:34.594221 15162 server.go:459] Event(v1.ObjectReference{Kind:”Node”, Namespace:””, Name:”10.211.55.21″, UID:”10.211.55.21″, APIVersion:””, ResourceVersion:””, FieldPath:””}): type: ‘Normal’ reason: ‘NodeHasNoDiskPressure’ Node 10.211.55.21 status is now: NodeHasNoDiskPressure
+I0222 11:37:34.594234 15162 server.go:459] Event(v1.ObjectReference{Kind:”Node”, Namespace:””, Name:”10.211.55.21″, UID:”10.211.55.21″, APIVersion:””, ResourceVersion:””, FieldPath:””}): type: ‘Normal’ reason: ‘NodeHasSufficientPID’ Node 10.211.55.21 status is now: NodeHasSufficientPID
+E0222 11:37:34.595476 15162 kubelet_node_status.go:94] Unable to register node “10.211.55.21” with API server: nodes “10.211.55.21” is forbidden: node “10.211.55.14” cannot modify node “10.211.55.21”
+I0222 11:37:34.679593 15162 request.go:530] Throttling request took 71.793333ms, request: PATCH:https://10.211.55.14:6443/api/v1/namespaces/default/events/10.211.55.21.1585926f6df48cec
+
+newgoo11个月前 (02-22)
+#0
+你好，请教一下，etcd注册网段怎么查看和更改呢？-etcd-prefix=/k8s/network 这个配置为什么没有这个文件/k8s/network呢？
+
+fy_starstar11个月前 (02-25)
+
+这个不是文件，是etcd注册网段etcdctl set /k8s/network/config设置的。
+
+三杯水11个月前 (02-25)
+#0
+vim /k8s/kubernetes/cfg/kubelet.config
+kind: KubeletConfiguration
+apiVersion: kubelet.config.k8s.io/v1beta1
+address: 192.168.169.163
+port: 10250
+readOnlyPort: 10255
+cgroupDriver: cgroupfs
+clusterDNS: [“10.254.0.10”]
+clusterDomain: cluster.local.
+failSwapOn: false
+authentication:
+anonymous:
+enabled: true
+这个·配置文件中address: 192.168.169.163这个ip是master节点的ip，还是node节点的IP？
+
+青衫磊落11个月前 (02-26)
+#0
+你好，请教一下。这个集群的各节点为什么没有cadvisor这个内置的监控服务呢，要怎么才能启动它呢？
+
+fy_starstar11个月前 (02-28)
+
+新版本没有了
+
+三杯水11个月前 (02-28)
+#0
+kubelet.kubeconfig 这个文件怎么来的的？
+
+ghost884411个月前 (03-01)
+
+这个文件自己写的，内容自己填的，这里面大部分文件都是自己写的，二进制安装的话只有二进制程序，配置文件都得自己手写。
+
+三杯水11个月前 (03-01)
+
+配置文件见：https://github.com/minminmsn/k8s1.13/blob/master/kubernetes/cfg/node/kubelet.config，cfg目录下。
+
+三杯水11个月前 (03-06)
+#0
+ingress-nginx并配置https转发dashboard
+dashboard 可以访问了
+但是ingress-nginx 不可以访问，
+ingress-nginx ingress-nginx LoadBalancer 10.254.89.53 80:39276/TCP,443:34190/TCP 6m50s
+,DeletionGracePeriodSeconds:nil,Labels:map[string]string{},Annotations:map[string]string{},OwnerReferences:[],Finalizers:[],ClusterName:,Initializers:nil,}, err services “ingress-nginx” not found
+
+atom11个月前 (03-06)
+
+ingress相关的可以参考：https://github.com/minminmsn/k8s1.13/tree/master/ingress-nginx ，配置好后ingress-nginx也可以访问的。
+
+三杯水11个月前 (03-06)
+#0
+您好，请问一下当我部署完某个服务，为什么只可以通过任意+访问服务，却无法通过+的方式访问服务呢？
+然后我通过kubectl cluster-info查询了cluster信息，发现集群是运行在localhost:8080上的，而不是主节点的ip地址，是不是这个原因呢？该怎么修改localhost为主节点ip？
+
+synapse11个月前 (03-06)
+
+您好，请问一下当我部署完某个服务，为什么只可以通过任意nodeip+端口号访问服务，却无法通过主节点ip+端口号的方式访问服务呢？
+然后我通过kubectl cluster-info查询了cluster信息，发现集群是运行在localhost:8080上的，而不是主节点的ip地址，是不是这个原因呢？该怎么修改localhost为主节点ip？
+
+synapse11个月前 (03-06)
+
+主节点上不跑pod的，pod跑在node节点上，nodeport模式下只能nodeip+端口号访问了。
+
+三杯水11个月前 (03-06)
+
+8080端口为了安全是监听在localhost的，kubectl默认查找loclhost:8080，另外还有6443端口，这个是master节点的IP，访问这个需要指定证书。
+
+三杯水11个月前 (03-06)
+#0
+遇到一个比较奇怪的问题，
+# kubectl get pods
+NAME READY STATUS RESTARTS AGE
+my-nginx-64f7fdcbd8-8dv4j 0/1 CrashLoopBackOff 7 11m
+my-nginx-64f7fdcbd8-sxg7m 0/1 CrashLoopBackOff 7 11m
+pod不断的重启，但
+# kubectl get pods -l run=my-nginx -o yaml | grep podIP
+podIP: 10.254.49.2
+podIP: 10.254.32.2
+直接访问 curl 10.254.32.2 却是正常的。重启的信息是 2019/03/08 08:32:05 [emerg] 1#1: bind() to 0.0.0.0:80 failed (98: Address already in use) ，但这个应该不是真时原因，感觉是master 没法获取pod的状态，所以在不断尝试重启
+
+cole11个月前 (03-08)
+
+看看pod的日志，或者使用其他pod测试试试。
+
+三杯水11个月前 (03-09)
+#0
+将etcd解压并拷贝到/k8s/etcd/bin/，并且配置后，执行systemctl enable etcd 出现：Failed to enable unit: File etcd.service: Invalid argument，是否还需要其他的配置，纯外行入门，请见谅
+
+淋漓飒沓11个月前 (03-08)
+
+etcd.service这个开机启动脚本还需要编辑，才能使用。
+
+三杯水11个月前 (03-09)
+#0
+请教个问题， pod中的容器不能访问外网，有没有遇到过这种情况？
+
+rudy11个月前 (03-09)
+
+node能上外网，pod就能上外网。默认pod会复制node节点的dns信息。
+
+三杯水11个月前 (03-10)
+#0
+3月 14 20:43:59 localhost.localdomain kube-apiserver[3699]: I0314 20:43:59.440890 3699 wrap.go:47] GET /apis/admissionregistration.k8s.io/v1beta1?timeout=32s: (55.26µs) 200 [kube-apiserver/v1.13.1 (linux/amd64) kubernetes/eec55b9 172.169.1.160:46770]
+
+woody10个月前 (03-14)
+#0
+您好，我在node上通过端口6443访问master的apiserver的时候（curl https://115.154.137.56:6443）出现了ssl的报错，curl: (60) SSL certificate problem: unable to get local issuer certificate不知道为什么。
+
+ttt10个月前 (03-25)
+
+默认连接6443需要指定证书，可以通过kubectl操作工具操作api，或者安装dashboard，参考https://github.com/minminmsn/k8s1.13。
+
+三杯水10个月前 (03-25)
+#0
+你好，配置完成之后，其他一切显示正常 但是 执行 kubectl get pods -n kube-system 这个命令之后 显示 No resources found 请问下是差什么步骤吗？
+
+tf10个月前 (03-27)
+
+默认二进制安装没有pods资源。
+
+三杯水10个月前 (03-27)
+#0
+为什么多个节点上面都部署etcd呢？只有master节点部署不也可以吗？
+
+zhangjx10个月前 (03-29)
+
+etcd是集群，默认3个节点比较稳定，1个节点是单点。
+
+三杯水10个月前 (03-29)
+
+请问，三个节点包含的etcd的内容是一样的吗？kube-api在访问etcd的时候应该是–etcd-servers中指定的ip:port,每一个都会存储信息到etcd中吗？
+
+zhangjx10个月前 (03-30)
+
+所谓集群，目的就是保持数据高可用，内容是一样的，api连接地址写多个，这些基础常识你可以百度下。
+
+三杯水10个月前 (03-30)
+
+集群比较清楚，就想知道flanneld,apiserver多个地址是一个轮询的机制查到就不往下面再查了？还是都要查一遍？这方面的资料没有查到，所以想问一下
+
+zhangjx10个月前 (03-30)
+
+任意查一个就行，给的结果都是一样的，就算每个上面数据不一致也会指定路由到正确的内容，集群机制都差不多，看看etcd集群原理有讲。
+
+三杯水10个月前 (04-01)
+#0
+您好 您的版本的是 etcd-v3.3.10，如果是etcd-v3.3.12版本能用您提供的配置文件和启动文件吗
+
+哈哈9个月前 (04-12)
+
+可以
+
+三杯水9个月前 (04-12)
+#0
+楼主你好, 我这里遇到一个问题,
+我是三个server, 一个master, 两个node(node1, 和node2)
+三个server上etcd服务都起来, 执行健康检查时, master的节点返回no available published client urls
+——————-
+member 2df49c340c2c2d86 is unreachable: no available published client urls
+member b319a881005c97d7 is healthy: got healthy result from https://192.168.224.130:2379
+member fa9a9428c415c940 is healthy: got healthy result from https://192.168.224.129:2379
+cluster is degraded
+
+——————-
+当两个node节点的etcd都停掉的时候, 再执行健康检查就可以got healthy result
+——————-
+member 8e9e05c52164694d is healthy: got healthy result from https://192.168.224.128:2379
+cluster is healthy
+——————-
+
+执行的命令都是
+/opt/kubernetes/bin/etcdctl –ca-file=ca.pem –cert-file=server.pem –key-file=server-key.pem –endpoints=”https://192.168.224.128:2379,https://192.168.224.129:2379,https://192.168.224.130:2379” cluster-health
+
+请问这个是怎么回事呢???
+
+风雨昭君9个月前 (04-18)
+#0
+楼主好，注意到flanneld.1的状态是unknown.
+4: flannel.1: mtu 1450 qdisc noqueue state UNKNOWN
+我按步骤执行后的结果也是一样。nmcli输出结果如下：
+[root@k8s_s1 log]# nmcli d
+DEVICE TYPE STATE CONNECTION
+docker0 bridge connected docker0
+ens192 ethernet connected ens192
+flannel.1 vxlan disconnected —
+
+ray792332li9个月前 (04-22)
+#0
+楼主您好！按照文档，在安装etcd的时候，启动etcd后会出现rejected connection from “192.168.60.167:58346” (error “remote error: tls: bad certificate”, ServerName “”)。。。。我的etcd集群是三节点的。不知这个问题怎么解决？
+
+ranran9个月前 (04-28)
+#0
+vim /k8s/kubernetes/cfg/kubelet
+
+KUBELET_OPTS=”–logtostderr=true \
+–v=4 \
+–hostname-override=10.2.8.65 \
+–kubeconfig=/k8s/kubernetes/cfg/kubelet.kubeconfig \
+–bootstrap-kubeconfig=/k8s/kubernetes/cfg/bootstrap.kubeconfig \
+–config=/k8s/kubernetes/cfg/kubelet.config \
+。。。
+请问，在以上代码中的三个配置文件中（kubelet.kubeconfig、bootstrap.kubeconfig、kubelet.config），kubelet.kubeconfig不存在啊，是不是哪里写漏了，还是把这个文件名改成bootstrap.kubeconfig
+
+zhf_sy9个月前 (04-30)
+
+好像是执行之后就会自动生成的
+
+leo9个月前 (04-30)
+
+这个需要提前编辑，文件可以参考这里：https://github.com/minminmsn/k8s1.13/tree/master/kubernetes/cfg/master
+
+三杯水9个月前 (05-03)
+
+kubelet.kubeconfig是启动kubelet服务并注册到master后自动生成的，而且在节点上执行kubectl get nodes会报The connection to the server localhost:8080 was refused – did you specify the right host or port，这是因为kubectl 默认从 ~/.kube/config 文件读取 kube-apiserver 地址、证书、用户名等信息,而kubelet.kubeconfig当中就包含这些信息，做个链接就可以了“ln -s /k8s/kubernetes/cfg/kubelet.kubeconfig ~/.kube/config
+
+梅生8个月前 (05-16)
+
+node节点上执行kubectl get nodes可以手动指定一些参数，你这样操作挺好的。
+
+三杯水8个月前 (05-18)
+
+我在 node节点建pod 报错kubectl run nginx –image=nginx
+
+Error from server (Forbidden): deployments.apps is forbidden: User “system:node:192.168.100.142” cannot create resource “deployments” in API group “apps” in the namespace “default”
+
+buck8个月前 (06-05)
+#0
+请问一下，部署完成后，使用kubectl get nodes命令查看work node，我的也是v1.13版本，3台server，但是跟这个文档一样也是显示2个nodes，没有显示master node，看到其他的文档是有显示的，请问为什么？？
+如果需要显示的话，需要如何配置？
+
+hihi1239个月前 (05-07)
+
+master是master，node是node，master不按照kubelet、docker等所以不显示了。
+
+三杯水8个月前 (05-18)
+#0
+配置etcd启动文件中的“EnvironmentFile=-/k8s/etcd/cfg/etcd.conf”等号后面多了一个“-”
+
+梅生8个月前 (05-14)
+
+嗯
+
+三杯水8个月前 (05-18)
+#0
+创建apiserver systemd文件部分的EnvironmentFile=-/k8s/kubernetes/cfg/kube-apiserver多了一个“-”
+
+梅生8个月前 (05-15)
+
+记不清了，你加-和不加-试试看都行不。
+
+三杯水8个月前 (05-18)
+#0
+您好，我按照这个安装，使用python客户端链接集群只能通过6443端口，但是会报ssl错误（不会指定证书），请问怎么解决呢
+
+lyh8个月前 (05-22)
+
+为了安全，默认除了master localhost 8080可以访问外，node或者其他地方需要ssl才能访问，可以试试指定认定文件kubelet.kubeconfig，到默认位置~/.kube/config，或者你写绝对位置试试。
+
+三杯水8个月前 (05-27)
+#0
+大兄得，我是使用的是腾讯云主机，由于是多个账号买的主机 私网不不通,所以用的公网ip,可是在etcd集群配置好后启动报错， listen tcp 公网ip:2380: bind: cannot assign requested addres 请问老哥这个有碰到过吗？可以给小弟一点建议吗？
+
+TheKey8个月前 (05-24)
+
+腾讯云主机好像不是经典网络，还是使用同网段的地址做etcd集群好一点儿。
+
+三杯水8个月前 (05-27)
+#0
+Unable to connect to the server: net/http: TLS handshake timeout
+
+小豪8个月前 (05-27)
+
+证书问题需要自己排查下
+
+三杯水8个月前 (05-27)
+
+kubectl get cs,nodes 在执行这条命令时候出现这个报错，这个不是因为访问不到外国镜像资源而报错的吗
+
+小豪8个月前 (05-28)
+
+不是，二进制安装，不需要外国镜像。
+
+三杯水8个月前 (06-07)
+
+检查一遍改了之后，现在检测master集群状态报Unable to connect to the server: context deadline exceeded
+
+小豪8个月前 (05-28)
+#0
+前面一切正常，就是get nodes No resources found.
+
+wang7个月前 (06-11)
+
+先kubectl get csr需要注册成功才会收到nodes，看看node节点kubelet是否正常启动。
+
+三杯水7个月前 (06-13)
+#0
+你好，证书一年过期怎么处理
+
+wang7个月前 (06-14)
+
+开始时制作10年的，否则的话就重新制作证书，重启kubernetes主节点服务，最后重启node节点服务。
+
+三杯水7个月前 (07-04)
+#0
+您好，我按照文档部署完了后 到最后一步kubectl get nodes出现 No resources found，我发现我node节点的kubelet服务总是自动关闭，执行完systemctl start kubelet后 过一秒钟就自动关闭了 这个您遇到过吗 ？
+
+nesta7个月前 (06-24)
+
+这个问题主要看cgroupDriver: cgroupfs ，这个参数配置是不是对的，centos与ubuntu不一样的。
+
+三杯水7个月前 (07-04)
+
+我修改了cgroupDriver，可还是同样的问题
+
+nesta6个月前 (07-16)
+
+看看kubelet日志信息了
+
+三杯水6个月前 (07-17)
+
+您好，我的 kubelet启动时查看状态有个这样的提示， Unable to read existing bootstrap client config: invalid configuration: [unable to read client-cert /k8s/kubernetes/ssl ] ，在master接受csr后，kubelet报错，查看日志 ,如下:
+7æœˆ 20 19:50:02 belonxu systemd[1]: kubelet.service: Unit entered failed state.
+7æœˆ 20 19:50:02 belonxu systemd[1]: kubelet.service: Failed with result ‘exit-co
+7æœˆ 20 19:50:03 belonxu systemd[1]: kubelet.service: Service hold-off time over,
+7æœˆ 20 19:50:03 belonxu systemd[1]: Stopped Kubernetes Kubelet.
+7æœˆ 20 19:50:03 belonxu systemd[1]: kubelet.service: Start request repeated too
+7æœˆ 20 19:50:03 belonxu systemd[1]: Failed to start Kubernetes Kubelet.
+7æœˆ 20 19:50:03 belonxu systemd[1]: kubelet.service: Unit entered failed state.
+7æœˆ 20 19:50:03 belonxu systemd[1]: kubelet.service: Failed with result ‘start-limit-hit’
+我之前加入成功过，隔了好久按同样的方式就出现了这样的问题，请问是否与token有关呢(我的集群是centos集群，要加入集群的节点是ubuntu16.04)
+
+nesta6个月前 (07-20)
+
+我的集群是centos集群，要加入集群的节点是ubuntu16.04
+
+nesta6个月前 (07-20)
+
+这2个系统的cgroupDrive不一样，ubuntu的默认是cgroupDriver: systemd
+
+三杯水6个月前 (07-23)
+
+补充:kubelet服务启动不了，查看日志除了我贴的内容外，最后一行显示的是:start-limit-hit错误
+
+nesta6个月前 (07-21)
+
+如果不是kubelet配置问题、证书问题、那就是资源问题了，大概就这几个原因。
+
+三杯水6个月前 (07-23)
+© 2020 Kubernetes中文社区   粤ICP备16060255号-2 版权说明 联系我们 广告投放 法律声明：本网站不隶属于谷歌或 Alphabet 公司 | kubernetes、kubernetes 标识及任何相关标志均为 Google LLC 公司的商标。
+
+去顶部
